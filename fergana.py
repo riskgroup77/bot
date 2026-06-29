@@ -1,6 +1,11 @@
 import asyncio
 import logging
 import os
+import sys
+
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ==============================================================================
 # 1. KUTUBXONALARNI IMPORT QILISH
@@ -8,6 +13,7 @@ import os
 
 # Telethon kutubxonasi (Spammer uchun)
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 # Python-telegram-bot kutubxonasi (Bot uchun)
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -22,108 +28,30 @@ from telegram.ext import (
 # 1-AKKAUNT
 account1_config = {
     'session_name': 'session_accountFergana',
-    'api_id': 32829828,
-    'api_hash': '637cabf2c6410546f550a430d93ccf2f',
-    'phone_number': '+998772120778',
-    'target_groups': ['https://t.me/+AUk-xjbXuWg1NTQ6']
+    'api_id': 33086552,
+    'api_hash': '0e7280c95def86a8e881193227e12d5c',
+    'phone_number': '+998911205090',
+    'target_groups': ['https://t.me/katta_shafyorlar']
 }
 
 
 
 # KALIT SO'ZLAR
 def generate_keywords():
-    # Asosiy xabar shablonlari (lotin)
-    latin_phrases = [
-        'yuk bor',
-        'yuk bor ekan',
-        'yuk borakan',
-        'moshina bor',
-        'mashina bor',
-        'moshina bor ekan',
-        'moshina borakan',
-        'mashina bor ekan',
-        'mashina borakan',
-        'moshina bor borakan',
-        'mashina bor borakan',
-        'moshina kerak',
+    keywords = [
+        'odam bor',
+        'одом бор',
+        'рошта бор',
+        'рочта бор',
+        'pochta bot',
         'mashina kerak',
-        'moshina kerak ekan',
-        'mashina kerak ekan',
-        'evakuator kerak',
-        'evakvator kerak',
-        'evakuator kerak ekan',
-        'evakvator kerak ekan',
-        'minivan kerak',
-        'yuk mashina kerak',
-        'yuk mashina bor',
-        'gruz bor',
-        'gruz kerak',
-    ]
-
-    # Mashina turlari / modellari (lotin)
-    car_models_latin = [
-        'kobalt', 'koblt', 'cobalt',
-        'jentra', 'gentra',
-        'nexia', 'nexiya', 'nexia3',
-        'spark', 'damas', 'labo', 'malibu',
-        'lacetti', 'lachetti', 'matiz', 'tiko',
-        'carnival', 'onix', 'tracker', 'priora',
-        'largus', 'logan', 'captiva', 'equinox',
-    ]
-
-    latin_suffixes = [' bor', ' bor ekan', ' borakan', ' kerak', ' kerak ekan']
-
-    latin_model_keywords = [
-        model + suffix
-        for model in car_models_latin
-        for suffix in latin_suffixes
-    ]
-
-    # Asosiy xabar shablonlari (kirill)
-    cyrillic_phrases = [
-        'юк бор',
-        'юк бор экан',
-        'машина бор',
-        'машина бор экан',
-        'мошина бор',
-        'машина керак',
+        'mashin kerak',
         'мошина керак',
-        'эвакуатор керак',
-        'эвакватор керак',
-        'эвакуатор керак экан',
-        'миниван керак',
-        'груз бор',
-        'груз керак',
-        'нужна машина',
-        'машина есть',
-        'нужен эвакуатор',
+        'мошин керак',
+        'машина керак',
+        'машин керак',
     ]
-
-    # Mashina turlari / modellari (kirill)
-    car_models_cyrillic = [
-        'кобальт', 'коблт',
-        'джентра', 'гентра',
-        'нексия', 'спарк',
-        'дамас', 'лабо', 'малибу',
-        'лацетти', 'матиз', 'тико',
-        'карнивал', 'оникс',
-        'трекер', 'приора',
-        'ларгус', 'логан',
-    ]
-
-    cyrillic_suffixes = [
-        ' бор', ' бор экан', ' боракан',
-        ' керак', ' керак экан',
-    ]
-
-    cyrillic_model_keywords = [
-        model + suffix
-        for model in car_models_cyrillic
-        for suffix in cyrillic_suffixes
-    ]
-
-    all_keywords = latin_phrases + latin_model_keywords + cyrillic_phrases + cyrillic_model_keywords
-    return list(set(k.lower() for k in all_keywords))
+    return list(set(k.lower() for k in keywords))
 
 KEYWORDS = generate_keywords()
 
@@ -185,19 +113,16 @@ async def add_spammer_event_handler(client, config):
 
     @client.on(events.NewMessage)
     async def handler(event):
-        # 1. Asosiy tekshiruvlar: xabar shaxsiy emasligi, bo'sh emasligi, guruhdanligi va bot emasligi
-        if event.is_private or not event.raw_text or not event.is_group or (event.sender and event.sender.bot):
+        # 1. Asosiy tekshiruvlar: xabar shaxsiy emasligi, bo'sh emasligi, guruhdanligi
+        if event.is_private or not event.raw_text or not event.is_group:
             return
 
-        # >>> YANGILANGAN QISM: USERNAME VA TAQIQLANGAN SO'ZLARNI TEKSHIRISH
-        
-        # Xabarni qayta ishlashdan oldin yuboruvchini bir marta olamiz
         sender = await event.get_sender()
         if not sender:
-            # Yuboruvchi topilmasa (masalan, anonim admin) ishni to'xtatish
             return
 
-        # 2. Foydalanuvchi username'ida "bot" so'zi borligini tekshirish
+        if getattr(sender, 'bot', False):
+            return
         # .lower() metodi 'bot', 'Bot', '_bot', 'MyBot' kabi barcha variantlarni qamrab oladi
         if sender.username and 'bot' in sender.username.lower():
             print(f"🚫 [FILTER - USERNAME] @{sender.username} nomida 'bot' so'zi borligi uchun xabar o'tkazib yuborildi.")
@@ -239,24 +164,61 @@ async def add_spammer_event_handler(client, config):
 
             print(f"✅ [SPAMMER - {phone}] xabar yubordi: {event.raw_text[:30]}...")
 
-async def run_telethon_client(config):
+async def ensure_telethon_session(config):
+    """Birinchi marta kirishda kod kiritish uchun alohida ulanish (bot ishlamaydi)."""
+    session_path = f"{config['session_name']}.session"
+    phone = config['phone_number']
     client = TelegramClient(config['session_name'], config['api_id'], config['api_hash'])
 
-    print(f"\n>>> [SPAMMER] {config['phone_number']} akkauntiga ulanmoqda...")
+    await client.connect()
+
+    if await client.is_user_authorized():
+        print(f"✅ [SPAMMER] Mavjud sessiya topildi ({session_path}). Kod kerak emas.")
+        await client.disconnect()
+        return True
+
+    print("\n" + "=" * 50)
+    print("📱 TELEGRAM KIRISH KODI KERAK")
+    print("=" * 50)
+    print("Kod odatda SMS emas — Telegram ilovasiga keladi!")
+    print("Telegram ilovasini oching va quyidagilarni tekshiring:")
+    print("  1. 'Telegram' xizmat xabarlari (yuqoridagi gap ikonkasi)")
+    print("  2. Boshqa qurilmalarda ochiq Telegram sessiyasi")
+    print("  3. Agar kod kelmasa, 5-10 daqiqa kutib qayta urinib ko'ring")
+    print("=" * 50 + "\n")
+
     try:
-        # Try to connect with a timeout approach using asyncio.wait_for
-        import asyncio
-        await asyncio.wait_for(client.start(phone=config['phone_number']), timeout=30.0)
-        print(f"✅ [SPAMMER] {config['phone_number']} muvaffaqiyatli ulandi!")
-    except asyncio.TimeoutError:
-        print(f"⏰ [SPAMMER] {config['phone_number']} ulanish vaqti tugadi (30 soniya)")
-        print("⚠️  Kod kelmasa, Telegram cheklovi sababli bo'lishi mumkin.")
-        return  # Exit this client if authentication fails
+        await client.start(phone=phone)
+        print(f"✅ [SPAMMER] {phone} muvaffaqiyatli ro'yxatdan o'tdi!")
+        print(f"✅ Sessiya saqlandi: {session_path}")
+        await client.disconnect()
+        return True
+    except FloodWaitError as e:
+        print(f"❌ [SPAMMER] Telegram cheklovi: {e.seconds} soniya kuting, keyin qayta urinib ko'ring.")
+    except PhoneCodeInvalidError:
+        print("❌ [SPAMMER] Noto'g'ri kod kiritildi. Dasturni qayta ishga tushiring.")
+    except SessionPasswordNeededError:
+        print("❌ [SPAMMER] Akkountda 2 bosqichli parol yoqilgan. Parol kiritish qo'shilishi kerak.")
     except Exception as e:
-        print(f"❌ [SPAMMER] {config['phone_number']} ulanishda xatolik: {e}")
-        print("⚠️  Iltimos, API ma'lumotlaringizni tekshiring yoki cheklovlar tugashini kuting.")
-        return  # Exit this client if authentication fails
-    
+        print(f"❌ [SPAMMER] Kirish xatoligi ({type(e).__name__}): {e}")
+    finally:
+        if client.is_connected():
+            await client.disconnect()
+    return False
+
+
+async def run_telethon_client(config):
+    client = TelegramClient(config['session_name'], config['api_id'], config['api_hash'])
+    phone = config['phone_number']
+
+    print(f"\n>>> [SPAMMER] {phone} akkauntiga ulanmoqda...")
+    try:
+        await client.start(phone=phone)
+        print(f"✅ [SPAMMER] {phone} muvaffaqiyatli ulandi!")
+    except Exception as e:
+        print(f"❌ [SPAMMER] {phone} ulanishda xatolik ({type(e).__name__}): {e}")
+        print("⚠️  Avval `python login_session.py` ni ishga tushirib sessiya yarating.")
+        return
 
     await add_spammer_event_handler(client, config)
     await client.run_until_disconnected()
@@ -353,6 +315,9 @@ async def run_bot():
         print("✅ BOT muvaffaqiyatli ishga tushdi.")
     except Exception as e:
         print(f"XATOLIK [BOT]: Botni ishga tushirishda muammo: {e}")
+        if "401" in str(e) or "Unauthorized" in str(e) or "rejected" in str(e).lower():
+            print("⚠️  BOT_TOKEN noto'g'ri yoki bekor qilingan.")
+            print("⚠️  @BotFather dan yangi token oling va fergana.py dagi BOT_TOKEN ni almashtiring.")
 
 
 # ==============================================================================
@@ -373,7 +338,16 @@ async def main():
     print(f"Taqiqlangan so'zlar/jumlalar: {FORBIDDEN_PHRASES}")
     print("="*50)
 
-    # Start both tasks, but allow bot to run even if spammer fails
+    # Sessiya fayli bo'lsa, qayta ochmaslik (database is locked xatosini oldini oladi)
+    session_file = f"{account1_config['session_name']}.session"
+    if not os.path.exists(session_file):
+        if not await ensure_telethon_session(account1_config):
+            print("\n⚠️  Spammer qismi ishlamaydi. Avval login qiling:")
+            print("    python login_session.py")
+            print("    yoki fergana.py ni qayta ishga tushiring va kodni kiriting.\n")
+    else:
+        print(f"✅ [SPAMMER] Mavjud sessiya topildi ({session_file}). Kod kerak emas.")
+
     spammer_task = asyncio.create_task(run_spammer())
     bot_task = asyncio.create_task(run_bot())
 
