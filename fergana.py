@@ -13,7 +13,13 @@ if sys.platform == 'win32':
 
 # Telethon kutubxonasi (Spammer uchun)
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError, PhoneCodeInvalidError, SessionPasswordNeededError
+from telethon.errors import (
+    ChannelPrivateError,
+    FloodWaitError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    SessionPasswordNeededError,
+)
 
 # Python-telegram-bot kutubxonasi (Bot uchun)
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -117,7 +123,11 @@ async def add_spammer_event_handler(client, config):
         if event.is_private or not event.raw_text or not event.is_group:
             return
 
-        sender = await event.get_sender()
+        try:
+            sender = await event.get_sender()
+        except ChannelPrivateError:
+            return
+
         if not sender:
             return
 
@@ -164,12 +174,60 @@ async def add_spammer_event_handler(client, config):
 
             print(f"✅ [SPAMMER - {phone}] xabar yubordi: {event.raw_text[:30]}...")
 
-async def ensure_telethon_session(config):
-    """Birinchi marta kirishda kod kiritish uchun alohida ulanish (bot ishlamaydi)."""
-    session_path = f"{config['session_name']}.session"
-    phone = config['phone_number']
-    client = TelegramClient(config['session_name'], config['api_id'], config['api_hash'])
 
+def clean_session_files(session_name):
+    """Telethon sessiya fayllarini to'liq o'chiradi."""
+    removed = []
+    for name in os.listdir('.'):
+        if name == f"{session_name}.session" or name.startswith(f"{session_name}.session-"):
+            try:
+                os.remove(name)
+                removed.append(name)
+            except OSError as e:
+                print(f"⚠️  {name} o'chirilmadi: {e}")
+    return removed
+
+
+def _describe_code_delivery(sent, phone):
+    """Kod qayerga yuborilganini tushuntiradi."""
+    code_type = type(sent.type).__name__
+    if code_type == 'SentCodeTypeApp':
+        return (
+            "Kod TELEGRAM ILOVASIGA yuborildi.\n"
+            f"  -> Telegram ni oching ({phone} bilan kirilgan)\n"
+            "  -> Yuqoridagi 'Chat' ikonkasi -> 'Telegram' xizmat xabari\n"
+            "  -> Eng oxirgi xabardagi 5 xonali kodni oling"
+        )
+    if code_type == 'SentCodeTypeSms':
+        return f"Kod SMS orqali yuborildi: {phone}"
+    if code_type == 'SentCodeTypeCall':
+        return f"Kod TELEFON QO'NG'IROG'I orqali aytiladi: {phone}"
+    return f"Kod yuborildi (tur: {code_type})"
+
+
+def _read_login_code():
+    """Terminaldan kod o'qish."""
+    while True:
+        code = input("Kodni kiriting (faqat raqamlar): ").strip().replace(" ", "")
+        if code.isdigit() and len(code) >= 5:
+            return code
+        print("Noto'g'ri format. Masalan: 12345")
+
+
+async def ensure_telethon_session(config, clean=False, force_sms=False):
+    """Telegram akkauntiga kirish. clean=True bo'lsa eski sessiyani o'chiradi."""
+    session_name = config['session_name']
+    session_path = f"{session_name}.session"
+    phone = config['phone_number']
+
+    if clean:
+        removed = clean_session_files(session_name)
+        if removed:
+            print(f"🗑️  O'chirildi: {', '.join(removed)}")
+        else:
+            print("🗑️  O'chiriladigan sessiya topilmadi.")
+
+    client = TelegramClient(session_name, config['api_id'], config['api_hash'])
     await client.connect()
 
     if await client.is_user_authorized():
@@ -177,28 +235,57 @@ async def ensure_telethon_session(config):
         await client.disconnect()
         return True
 
+    # Yarim sessiya loginni buzishi mumkin — tozalaymiz
+    await client.disconnect()
+    clean_session_files(session_name)
+    client = TelegramClient(session_name, config['api_id'], config['api_hash'])
+    await client.connect()
+
     print("\n" + "=" * 50)
-    print("📱 TELEGRAM KIRISH KODI KERAK")
+    print(f"📱 TELEGRAM KIRISH: {phone}")
     print("=" * 50)
-    print("Kod odatda SMS emas — Telegram ilovasiga keladi!")
-    print("Telegram ilovasini oching va quyidagilarni tekshiring:")
-    print("  1. 'Telegram' xizmat xabarlari (yuqoridagi gap ikonkasi)")
-    print("  2. Boshqa qurilmalarda ochiq Telegram sessiyasi")
-    print("  3. Agar kod kelmasa, 5-10 daqiqa kutib qayta urinib ko'ring")
-    print("=" * 50 + "\n")
 
     try:
-        await client.start(phone=phone)
+        sent = await client.send_code_request(phone, force_sms=force_sms)
+        print(_describe_code_delivery(sent, phone))
+        print("=" * 50)
+        print("DIQQAT: Kod 2-3 daqiqada eskiradi. Tez kiriting!")
+        print("Agar kod kelmasa: python login_session.py --sms")
+        print("=" * 50 + "\n")
+
+        for attempt in range(3):
+            try:
+                code = _read_login_code()
+                await client.sign_in(phone=phone, code=code, phone_code_hash=sent.phone_code_hash)
+                break
+            except PhoneCodeInvalidError:
+                print("❌ Noto'g'ri kod. Qayta urinib ko'ring (yangi kod kerak bo'lishi mumkin).")
+                if attempt == 2:
+                    raise
+            except PhoneCodeExpiredError:
+                print("⏰ Kod eskirgan. Yangi kod so'ralmoqda...")
+                sent = await client.send_code_request(phone, force_sms=force_sms)
+                print(_describe_code_delivery(sent, phone))
+
         print(f"✅ [SPAMMER] {phone} muvaffaqiyatli ro'yxatdan o'tdi!")
         print(f"✅ Sessiya saqlandi: {session_path}")
         await client.disconnect()
         return True
-    except FloodWaitError as e:
-        print(f"❌ [SPAMMER] Telegram cheklovi: {e.seconds} soniya kuting, keyin qayta urinib ko'ring.")
-    except PhoneCodeInvalidError:
-        print("❌ [SPAMMER] Noto'g'ri kod kiritildi. Dasturni qayta ishga tushiring.")
+
     except SessionPasswordNeededError:
-        print("❌ [SPAMMER] Akkountda 2 bosqichli parol yoqilgan. Parol kiritish qo'shilishi kerak.")
+        print("\n🔐 Akkountda 2 bosqichli parol yoqilgan.")
+        password = input("2FA parolni kiriting: ").strip()
+        await client.sign_in(password=password)
+        print(f"✅ [SPAMMER] {phone} parol bilan muvaffaqiyatli kirdi!")
+        await client.disconnect()
+        return True
+    except FloodWaitError as e:
+        minutes = max(1, e.seconds // 60)
+        print(f"❌ [SPAMMER] Telegram cheklovi: {e.seconds} soniya ({minutes} daqiqa) kuting.")
+        print("   Sabab: juda ko'p marta kod so'ralgan. Kutib, keyin qayta urinib ko'ring.")
+    except PhoneCodeInvalidError:
+        print("❌ [SPAMMER] Kod 3 marta noto'g'ri kiritildi. Sessiyani tozalab qayta urinib ko'ring:")
+        print("   python login_session.py --clean")
     except Exception as e:
         print(f"❌ [SPAMMER] Kirish xatoligi ({type(e).__name__}): {e}")
     finally:
