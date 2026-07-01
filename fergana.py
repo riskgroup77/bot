@@ -300,11 +300,14 @@ async def run_telethon_client(config):
 
     print(f"\n>>> [SPAMMER] {phone} akkauntiga ulanmoqda...")
     try:
-        await client.start(phone=phone)
+        await client.connect()
+        if not await client.is_user_authorized():
+            print(f"❌ [SPAMMER] Sessiya yaroqsiz yoki muddati tugagan.")
+            print("⚠️  Lokal kompyuterdan login qiling: python login_session.py --clean")
+            return
         print(f"✅ [SPAMMER] {phone} muvaffaqiyatli ulandi!")
     except Exception as e:
         print(f"❌ [SPAMMER] {phone} ulanishda xatolik ({type(e).__name__}): {e}")
-        print("⚠️  Avval `python login_session.py` ni ishga tushirib sessiya yarating.")
         return
 
     await add_spammer_event_handler(client, config)
@@ -425,20 +428,37 @@ async def main():
     print(f"Taqiqlangan so'zlar/jumlalar: {FORBIDDEN_PHRASES}")
     print("="*50)
 
-    # Sessiya fayli bo'lsa, qayta ochmaslik (database is locked xatosini oldini oladi)
+    # Sessiya tekshiruvi (faqat fayl mavjudligi emas, haqiqiy avtorizatsiya)
     session_file = f"{account1_config['session_name']}.session"
-    if not os.path.exists(session_file):
-        if not await ensure_telethon_session(account1_config):
-            print("\n⚠️  Spammer qismi ishlamaydi. Avval login qiling:")
-            print("    python login_session.py")
-            print("    yoki fergana.py ni qayta ishga tushiring va kodni kiriting.\n")
+    if os.path.exists(session_file):
+        check_client = TelegramClient(
+            account1_config['session_name'],
+            account1_config['api_id'],
+            account1_config['api_hash'],
+        )
+        await check_client.connect()
+        authorized = await check_client.is_user_authorized()
+        await check_client.disconnect()
+        if authorized:
+            print(f"✅ [SPAMMER] Sessiya faol ({session_file}).")
+        else:
+            print(f"⚠️  [SPAMMER] Sessiya fayli bor, lekin avtorizatsiya yo'q.")
+            if sys.stdin.isatty():
+                await ensure_telethon_session(account1_config)
+            else:
+                print("⚠️  Server rejimi: python login_session.py --clean ni lokalda ishga tushiring.")
     else:
-        print(f"✅ [SPAMMER] Mavjud sessiya topildi ({session_file}). Kod kerak emas.")
+        if sys.stdin.isatty():
+            if not await ensure_telethon_session(account1_config):
+                print("\n⚠️  Spammer qismi ishlamaydi. Avval login qiling.\n")
+        else:
+            print("\n⚠️  Sessiya topilmadi. login_session.py orqali kirish kerak.\n")
 
     spammer_task = asyncio.create_task(run_spammer())
     bot_task = asyncio.create_task(run_bot())
 
-    await asyncio.gather(spammer_task, bot_task, return_exceptions=True)
+    # Spammer asosiy jarayon — u ishlayotguncha dastur yashaydi
+    await spammer_task
 
 if __name__ == "__main__":
     try:
